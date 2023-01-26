@@ -16,6 +16,7 @@ import yaml
 import warnings
 import langcodes
 from inspect import getmembers, isfunction
+import unicodedataplus
 
 #import sys
 #sys.stdout = None
@@ -41,19 +42,191 @@ def unique_everseen(iterable, key=None):
                 seen_add(k)
                 yield element
 
-def auto_detect(text, plugin = False):
+from tqdm import tqdm
+def test_auto_detect():
+    output = []
+    for cp in tqdm(range(0x110000)):
+        char = chr(cp)
+        if unicodedataplus.script(char) in {"Unknown"}:
+            continue
+        try:
+            ad1 = auto_detect(char)
+        except IndexError:
+            ad1 = None
+        try:
+            ad2 = auto_detect(char, use_unicodedataplus=True)
+        except IndexError:
+            ad2 = None
+        if ad1 != ad2:
+            output.append((hex(ord(char)), char, ad1, ad2))
+    return output
+
+script_remap = {
+    "Meetei_Mayek": "Meetei",
+    "Old_Persian": "Persian",
+    "Phags_Pa": "Phags-Pa",
+    "Ol_Chiki": "Santali",
+    "Sora_Sompeng": "Sora",
+    "Syloti_Nagri": "Syloti",
+    "Warang_Citi": "Warang",
+    "Zanabazar_Square": "Zanabazar",
+    "Tai_Le": "Tai",
+    "Tai_Tham": "Tai",
+    "Tai_Viet": "Tai",
+}
+
+bs_char_remap = {0x00AA, 0x00BA, 0x0483, 0x0484, 0x0487, 0x0488, 0x0489, 0x1D78, 0x2071, 0x207F,
+0x2071,
+ 0x207f,
+ 0x212a,
+ 0x212b,
+ 0x2132,
+ 0x214e,
+ 0x2160,
+ 0x2161,
+ 0x2162,
+ 0x2163,
+ 0x2164,
+ 0x2165,
+ 0x2166,
+ 0x2167,
+ 0x2168,
+ 0x2169,
+ 0x216a,
+ 0x216b,
+ 0x216c,
+ 0x216d,
+ 0x216e,
+ 0x216f,
+ 0x2170,
+ 0x2171,
+ 0x2172,
+ 0x2173,
+ 0x2174,
+ 0x2175,
+ 0x2176,
+ 0x2177,
+ 0x2178,
+ 0x2179,
+ 0x217a,
+ 0x217b,
+ 0x217c,
+ 0x217d,
+ 0x217e,
+ 0x217f,
+ 0x2180,
+ 0x2181,
+ 0x2182,
+ 0x2183,
+ 0x2185,
+ 0x2186,
+ 0x2187,
+ 0x2188, 0x2C7D, 0xA66F, 0xA770, 0xA7F8, 0xA7F9, 0xAB5E, 0xAB5F, 0xAB69, 0x1f200}
+
+bs_range_remap = [
+    (0x02B0, 0x02B8),
+    (0x02E0, 0x02E4),
+    (0x1D2C, 0x1D61),
+    (0x1D9B, 0x1DBE),
+    (0x1B002, 0x1B0FF),
+    (0x1b100, 0x1b11e),
+    (0x2DE0, 0x2DFF),
+    (0x32D0, 0x3357),
+    (0xA674, 0xA67D),
+    (0xA670, 0xA673),
+    (0xA69C, 0xA69F),
+    (0xA8E0, 0xA8F1),
+    (0xAB5C, 0xAB5D),
+    (0xFE2E, 0xFE2F),
+    (0xFF21, 0xFF5A),
+    (0xFF66, 0xFF9D),
+    (0x10B3A, 0x10B3F),
+    (0x11366, 0x11374)
+]
+
+char_remap = {
+    1541: 'Arabic',
+    1548: 'Arabic',
+    1563: 'Arabic',
+    1567: 'Arabic',
+    1600: 'Arabic',
+    1611: 'Arabic',
+    1612: 'Arabic',
+    1613: 'Arabic',
+    1614: 'Arabic',
+    1615: 'Arabic',
+    1616: 'Arabic',
+    1617: 'Arabic',
+    1618: 'Arabic',
+    1619: 'Arabic',
+    1620: 'Arabic',
+    1621: 'Arabic',
+    1648: 'Arabic',
+    1757: 'Arabic',
+    2274: 'Arabic',
+    2385: 'Devanagari',
+    2386: 'Devanagari',
+    2387: 'Devanagari',
+    2388: 'Devanagari',
+    2404: 'Devanagari',
+    2405: 'Devanagari',
+    3647: 'Thai',
+    6146: 'Mongolian', 6147: 'Mongolian', 6149: 'Mongolian',
+    0x271d: 'Latin',
+    0x30fb: 'Katakana',
+    0xA9CF: "Javanese",
+
+}
+
+range_unsupported = [
+    (0x0000, 0x001F),
+    (0x007F, 0x009F),
+    (0x17000, 0x187F7),
+    (0x18D00, 0x18D08),
+]
+
+def auto_detect(text, plugin = False, use_unicodedataplus = False, debug = False):
     scripts = []
 
     for uchar in text:
-        try:
-            script_name = unicodedata.name(uchar).split(' ')[0].lower()
-            if script_name != 'old':
-                scripts.append(script_name)
+        if use_unicodedataplus:
+            skip = False
+            skip = unicodedataplus.age(uchar) in {"14.0", "15.0", "Unassigned"}
+            # skip = unicodedataplus.script(uchar) in unsupported_scripts
+            udp_script = unicodedataplus.script(uchar)
+            try:
+                udp_script = script_remap[udp_script]
+            except KeyError:
+                pass
+            try:
+                udp_script = char_remap[ord(uchar)]
+            except KeyError:
+                pass
+            if ord(uchar) in bs_char_remap:
+                udp_script = "bullshit"
             else:
-                scripts.append(unicodedata.name(uchar).split(' ')[1].lower())
-        except ValueError:
-            pass
-            # print('Script not found')
+                for r in range_unsupported:
+                    if ord(uchar) >= r[0] and ord(uchar) <= r[1]:
+                        skip = True
+                        break
+                for r in bs_range_remap:
+                    if ord(uchar) >= r[0] and ord(uchar) <= r[1]:
+                        udp_script = "bullshit"
+                        break
+            if not skip:
+                scripts.append(udp_script.lower())
+        else:
+            try:
+                script_name = unicodedata.name(uchar).split(' ')[0].lower()
+                if script_name != 'old':
+                    scripts.append(script_name)
+                else:
+                    scripts.append(unicodedata.name(uchar).split(' ')[1].lower())
+            except ValueError:
+                pass
+                # print('Script not found')
+    if debug:
+        print(scripts)
 
     counts = Counter(scripts)
     script_percent = []
@@ -79,6 +252,8 @@ def auto_detect(text, plugin = False):
         else:
             script = ''
 
+    if debug:
+        print(script)
     inputScript = script[0].upper() + script[1:]
 
     laoPali = ['ຆ', 'ຉ', 'ຌ', 'ຎ', 'ຏ', 'ຐ', 'ຑ', 'ຒ', 'ຓ', 'ຘ', 'ຠ', 'ຨ', 'ຩ', 'ຬ', '຺']
